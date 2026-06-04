@@ -176,7 +176,7 @@ def parse_options_command(raw: str) -> dict:
 
 
 async def execute_options_trade(parsed: dict) -> dict:
-    """Submit an options order directly to Alpaca (market order, DAY)."""
+    """Submit an options order via Alpaca REST API (market order, DAY)."""
     if not ALPACA_API_KEY or not ALPACA_API_SECRET:
         msg = (
             f"[DRY RUN — no Alpaca keys] Would {parsed['action'].upper()} "
@@ -185,27 +185,31 @@ async def execute_options_trade(parsed: dict) -> dict:
         return {"status": "dry_run", "result": msg}
 
     def _submit():
-        from alpaca.trading.client import TradingClient
-        from alpaca.trading.requests import OptionsOrderRequest
-        from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
+        import requests as http
 
-        client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=ALPACA_PAPER)
-        side = OrderSide.BUY if parsed["action"] == "buy" else OrderSide.SELL
-
-        req = OptionsOrderRequest(
-            symbol=parsed["occ_symbol"],
-            qty=parsed["quantity"],
-            side=side,
-            type=OrderType.MARKET,
-            time_in_force=TimeInForce.DAY,
-        )
-        submitted = client.submit_order(req)
+        base = "https://paper-api.alpaca.markets" if ALPACA_PAPER else "https://api.alpaca.markets"
+        headers = {
+            "APCA-API-KEY-ID": ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "symbol": parsed["occ_symbol"],
+            "qty": str(parsed["quantity"]),
+            "side": parsed["action"],
+            "type": "market",
+            "time_in_force": "day",
+        }
+        resp = http.post(f"{base}/v2/orders", json=payload, headers=headers, timeout=15)
+        data = resp.json()
+        if resp.status_code not in (200, 201):
+            return {"status": "error", "result": f"Alpaca error: {data.get('message', data)}"}
         mode = "PAPER" if ALPACA_PAPER else "LIVE"
         return {
             "status": "submitted",
             "result": (
                 f"[{mode}] {parsed['action'].upper()} {parsed['quantity']} contract(s) "
-                f"{parsed['occ_symbol']} | order_id={submitted.id} status={submitted.status}"
+                f"{parsed['occ_symbol']} | order_id={data['id']} status={data['status']}"
             ),
         }
 
